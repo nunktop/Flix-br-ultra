@@ -53,6 +53,24 @@
     font-size: 1.25rem;
   }
 
+  .tv-mode *:focus-visible,
+  .tv-mode *:focus {
+    outline: 4px solid #dc2626 !important; /* Tailwind red-600 */
+    outline-offset: 4px !important;
+    transform: scale(1.05);
+    transition: all 0.2s ease-in-out;
+    z-index: 50;
+    box-shadow: 0 0 20px rgba(220, 38, 38, 0.6) !important;
+  }
+
+  .tv-mode input:focus {
+    transform: scale(1.02);
+  }
+
+  .tv-mode .group:focus .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+
   .tv-mode .media-card {
     width: 320px;
   }

@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, X, Play, SkipForward, History, ChevronRight, ChevronLeft, Film, Tv, TrendingUp, Star, Server, Sparkles, AlertCircle, RefreshCcw, Bell, Maximize, Minimize, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from './lib/supabase';
+import { AuthForm } from './components/AuthForm';
 
 const TMDB_API_KEY = "3b215855a4f169f976bbf143c4558d17";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
@@ -73,7 +75,7 @@ interface User {
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [adminUsers, setAdminUsers] = useState<User[]>([]);
   const [vipDaysToAdd, setVipDaysToAdd] = useState(30);
@@ -119,9 +121,19 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
 
+  const getAuthHeaders = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session?.access_token}`
+    };
+  };
+
   const fetchAdminUsers = async () => {
     try {
-      const res = await fetch("/api/users");
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/admin/users", { headers });
+      if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
       setAdminUsers(data);
     } catch (err) {
@@ -131,10 +143,20 @@ export default function App() {
 
   const updateVip = async (userId: string, days: number, isVip?: boolean) => {
     try {
-      const res = await fetch("/api/users/update-vip", {
+      const headers = await getAuthHeaders();
+      
+      // Calculate new vip_until date
+      let vipUntil = null;
+      if (isVip !== false) {
+        const date = new Date();
+        date.setDate(date.getDate() + days);
+        vipUntil = date.toISOString();
+      }
+
+      const res = await fetch("/api/admin/users/vip", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, days, isVip })
+        headers,
+        body: JSON.stringify({ userId, isVip: isVip !== false, vipUntil })
       });
       const data = await res.json();
       if (data.success) {
@@ -148,7 +170,11 @@ export default function App() {
   const deleteUser = async (userId: string) => {
     if (!confirm("Tem certeza que deseja excluir este usuário?")) return;
     try {
-      const res = await fetch(`/api/users/${userId}`, { method: "DELETE" });
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/admin/users/${userId}`, { 
+        method: "DELETE",
+        headers
+      });
       const data = await res.json();
       if (data.success) {
         fetchAdminUsers();
@@ -163,9 +189,10 @@ export default function App() {
   const handleResetPassword = async (userId: string) => {
     if (!newPasswordValue.trim()) return;
     try {
-      const res = await fetch("/api/users/reset-password", {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/admin/users/reset-password", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId, newPassword: newPasswordValue })
       });
       const data = await res.json();
@@ -182,15 +209,24 @@ export default function App() {
   const handleAdminCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch("/api/users/create", {
+      const headers = await getAuthHeaders();
+      
+      let vipUntil = null;
+      if (newUserIsVip) {
+        const date = new Date();
+        date.setDate(date.getDate() + newUserVipDays);
+        vipUntil = date.toISOString();
+      }
+
+      const res = await fetch("/api/admin/users/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
-          username: newUserUsername,
+          email: newUserUsername,
           password: newUserPassword,
           isAdmin: newUserIsAdmin,
           isVip: newUserIsVip,
-          vipDays: newUserVipDays
+          vipUntil
         })
       });
       const data = await res.json();
@@ -211,10 +247,43 @@ export default function App() {
   };
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
+    const fetchProfileAndSetUser = async (authUser: any) => {
+      if (!authUser) {
+        setUser(null);
+        return;
+      }
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', authUser.id).single();
+      setUser({
+        ...authUser,
+        isAdmin: profile?.is_admin || false,
+        isVip: profile?.is_vip || false,
+        vipUntil: profile?.vip_until,
+        username: profile?.username || authUser.email,
+      });
+    };
+
+    // Check active sessions and sets the user
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      fetchProfileAndSetUser(session?.user ?? null);
+    });
+
+    // Listen for changes on auth state (logged in, signed out, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      fetchProfileAndSetUser(session?.user ?? null);
+    });
+
+    // Verify database connection to the profiles table
+    const verifyDbConnection = async () => {
+      const { error } = await supabase.from('profiles').select('id').limit(1);
+      if (error) {
+        console.error("Erro ao conectar com as tabelas do Supabase:", error.message);
+      } else {
+        console.log("✅ Conexão com o Supabase e tabelas verificada com sucesso!");
+      }
+    };
+    verifyDbConnection();
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const toggleTvMode = () => {
@@ -441,7 +510,90 @@ export default function App() {
         console.error("Erro ao carregar histórico:", e);
       }
     }
+  }, []);
 
+  // Spatial Navigation for TV Mode
+  useEffect(() => {
+    if (!isTvMode) return;
+
+    const handleSpatialNav = (e: KeyboardEvent) => {
+      // Ignore if inside iframe
+      if (document.activeElement?.tagName === 'IFRAME') return;
+
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+
+      const activeElement = document.activeElement as HTMLElement;
+      if (!activeElement || activeElement === document.body) {
+        const firstFocusable = document.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') as HTMLElement;
+        if (firstFocusable) firstFocusable.focus();
+        return;
+      }
+
+      if (activeElement.tagName === 'INPUT' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        return;
+      }
+
+      e.preventDefault();
+
+      const focusableElements = Array.from(document.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+        .filter(el => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.opacity !== '0' && style.display !== 'none';
+        }) as HTMLElement[];
+
+      const currentRect = activeElement.getBoundingClientRect();
+      let bestMatch: HTMLElement | null = null;
+      let minDistance = Infinity;
+
+      focusableElements.forEach(el => {
+        if (el === activeElement) return;
+        const rect = el.getBoundingClientRect();
+
+        let isDirectionMatch = false;
+        let distance = Infinity;
+
+        const currentCenterX = currentRect.left + currentRect.width / 2;
+        const currentCenterY = currentRect.top + currentRect.height / 2;
+        const elCenterX = rect.left + rect.width / 2;
+        const elCenterY = rect.top + rect.height / 2;
+
+        const dx = elCenterX - currentCenterX;
+        const dy = elCenterY - currentCenterY;
+
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+        if (e.key === 'ArrowRight' && Math.abs(angle) <= 45) {
+          isDirectionMatch = true;
+          distance = Math.sqrt(dx * dx + dy * dy * 4);
+        } else if (e.key === 'ArrowLeft' && Math.abs(angle) >= 135) {
+          isDirectionMatch = true;
+          distance = Math.sqrt(dx * dx + dy * dy * 4);
+        } else if (e.key === 'ArrowDown' && angle > 45 && angle < 135) {
+          isDirectionMatch = true;
+          distance = Math.sqrt(dx * dx * 4 + dy * dy);
+        } else if (e.key === 'ArrowUp' && angle < -45 && angle > -135) {
+          isDirectionMatch = true;
+          distance = Math.sqrt(dx * dx * 4 + dy * dy);
+        }
+
+        if (isDirectionMatch && distance < minDistance) {
+          minDistance = distance;
+          bestMatch = el;
+        }
+      });
+
+      if (bestMatch) {
+        (bestMatch as HTMLElement).focus();
+        (bestMatch as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      }
+    };
+
+    window.addEventListener('keydown', handleSpatialNav);
+    return () => window.removeEventListener('keydown', handleSpatialNav);
+  }, [isTvMode]);
+
+  useEffect(() => {
     // Smart TV Back Button Handler
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Backspace') {
@@ -1217,104 +1369,15 @@ export default function App() {
     </div>
   );
 
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [showLoginScreen, setShowLoginScreen] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginError("");
-    try {
-      const res = await fetch("/api/users/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: loginUsername, password: loginPassword })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setUser(data.user);
-        localStorage.setItem("user", JSON.stringify(data.user));
-        setShowLoginScreen(false);
-      } else {
-        setLoginError(data.message);
-      }
-    } catch (err) {
-      setLoginError("Erro ao conectar ao servidor");
-    }
-  };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
-    localStorage.removeItem("user");
   };
 
-  if (showLoginScreen) {
-    return (
-      <div className="min-h-screen bg-[#0b0b0b] text-white flex items-center justify-center p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white/5 p-8 rounded-2xl border border-white/10 w-full max-w-md relative"
-        >
-          <button 
-            onClick={() => setShowLoginScreen(false)}
-            className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-          
-          <div className="flex justify-center mb-8">
-            <div className="flex items-center gap-2">
-              <Play className="w-8 h-8 text-red-600 fill-red-600" />
-              <span className="text-2xl font-black italic tracking-tighter">
-                CINE<span className="text-red-600">VERSE</span>
-              </span>
-            </div>
-          </div>
-          
-          <h2 className="text-xl font-bold text-center mb-6">Acesse sua conta</h2>
-          
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-white/40 block mb-2">Usuário</label>
-              <input 
-                type="text" 
-                required
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:border-red-600 outline-none transition-colors"
-                placeholder="Digite seu usuário"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-white/40 block mb-2">Senha</label>
-              <input 
-                type="password" 
-                required
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:border-red-600 outline-none transition-colors"
-                placeholder="Digite sua senha"
-              />
-            </div>
-            
-            {loginError && (
-              <div className="text-red-500 text-sm font-bold text-center bg-red-500/10 py-2 rounded">
-                {loginError}
-              </div>
-            )}
-            
-            <button 
-              type="submit"
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-black uppercase tracking-widest py-3 rounded-lg transition-colors mt-4"
-            >
-              Entrar
-            </button>
-          </form>
-        </motion.div>
-      </div>
-    );
+  if (!user) {
+    return <AuthForm onSuccess={() => {}} />;
   }
 
   return (
@@ -1353,7 +1416,7 @@ export default function App() {
                     { label: 'Desenhos', action: () => { setSpecialCategory('animation'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); } },
                     { label: 'Continuar Assistindo', action: () => { setShowContinue(true); setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); } },
                     { label: 'Pesquisar', action: () => { document.querySelector('input')?.focus(); } },
-                    user ? { label: 'Sair da Conta', action: () => { handleLogout(); setIsFullMenuOpen(false); } } : { label: 'Login', action: () => { setShowLoginScreen(true); setIsFullMenuOpen(false); } }
+                    { label: 'Sair da Conta', action: () => { handleLogout(); setIsFullMenuOpen(false); } }
                   ].map((item, i) => (
                     <button
                       key={i}
@@ -1440,28 +1503,19 @@ export default function App() {
             {user?.isAdmin && (
               <button 
                 onClick={() => { setIsAdminPanelOpen(true); fetchAdminUsers(); }}
-                className="text-xs font-bold text-red-500 hover:text-white transition-all focus:outline-none focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1"
+                className="text-xs font-bold text-red-500 hover:text-white transition-all focus:outline-none focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 flex items-center gap-1"
               >
-                Admin
+                <Star className="w-3 h-3" />
+                Painel VIP
               </button>
             )}
-            {user ? (
-              <button 
-                onClick={handleLogout}
-                className="text-xs font-bold text-white/60 hover:text-white transition-all focus:outline-none focus:ring-2 focus:ring-white/20 rounded-md px-2 py-1 flex items-center gap-1"
-              >
-                <LogOut className="w-3 h-3" />
-                Sair
-              </button>
-            ) : (
-              <button 
-                onClick={() => setShowLoginScreen(true)}
-                className="text-xs font-bold text-white/60 hover:text-white transition-all focus:outline-none focus:ring-2 focus:ring-white/20 rounded-md px-2 py-1 flex items-center gap-1"
-              >
-                <LogOut className="w-3 h-3" />
-                Login
-              </button>
-            )}
+            <button 
+              onClick={handleLogout}
+              className="text-xs font-bold text-white/60 hover:text-white transition-all focus:outline-none focus:ring-2 focus:ring-white/20 rounded-md px-2 py-1 flex items-center gap-1"
+            >
+              <LogOut className="w-3 h-3" />
+              Sair
+            </button>
           </div>
 
           <nav className={`hidden md:flex items-center gap-6 text-sm font-bold text-white/60 uppercase tracking-wider ${isTvMode ? 'text-lg gap-10' : ''}`}>
@@ -1947,10 +2001,11 @@ export default function App() {
               {/* Sandbox added to block popups and improve flow */}
               <iframe
                 src={renderPlayerUrl()}
-                className="w-full h-full border-none"
+                className="w-full h-full border-none focus:ring-4 focus:ring-red-600 focus:outline-none"
                 allowFullScreen
                 title="Video Player"
                 sandbox="allow-forms allow-scripts allow-same-origin allow-presentation"
+                tabIndex={0}
               />
               
               {/* Overlay removed to allow full touch access to player controls on mobile */}
@@ -1990,14 +2045,30 @@ export default function App() {
             <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="bg-[#141414] w-full max-w-4xl p-8 rounded-2xl border border-white/10 shadow-2xl max-h-[80vh] flex flex-col"
+              className="bg-[#141414] w-full max-w-4xl p-4 md:p-8 rounded-2xl border border-white/10 shadow-2xl max-h-[90vh] flex flex-col"
             >
               <div className="flex justify-between items-center mb-8">
                 <div className="flex items-center gap-3">
-                  <Server className="w-6 h-6 text-red-600" />
-                  <h2 className="text-2xl font-black italic text-red-600 uppercase tracking-tighter">Painel Admin</h2>
+                  <Star className="w-6 h-6 text-red-600" />
+                  <h2 className="text-2xl font-black italic text-red-600 uppercase tracking-tighter">Painel VIP</h2>
                 </div>
                 <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                    <input 
+                      type="text" 
+                      placeholder="Buscar por email..." 
+                      onChange={(e) => {
+                        const val = e.target.value.toLowerCase();
+                        if (!val) {
+                          fetchAdminUsers();
+                        } else {
+                          setAdminUsers(prev => prev.filter(u => u.username?.toLowerCase().includes(val)));
+                        }
+                      }}
+                      className="bg-white/5 border border-white/10 rounded-full pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-red-600 text-white w-48"
+                    />
+                  </div>
                   <button 
                     onClick={fetchAdminUsers}
                     className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-black px-4 py-2 rounded uppercase transition-all flex items-center gap-2"
@@ -2083,8 +2154,8 @@ export default function App() {
                 </motion.form>
               )}
 
-              <div className="flex-1 overflow-y-auto no-scrollbar">
-                <table className="w-full text-left">
+              <div className="flex-1 overflow-y-auto overflow-x-auto no-scrollbar">
+                <table className="w-full text-left min-w-[700px]">
                   <thead>
                     <tr className="border-b border-white/5 text-white/40 text-[10px] uppercase tracking-widest">
                       <th className="pb-4 font-black">Usuário</th>
@@ -2093,27 +2164,36 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {adminUsers.map((u) => (
+                    {adminUsers.map((u: any) => {
+                      const isVipActive = u.is_vip && (!u.vip_until || new Date(u.vip_until) > new Date());
+                      const isExpired = u.is_vip && u.vip_until && new Date(u.vip_until) <= new Date();
+                      
+                      return (
                       <tr key={u.id} className="group">
                         <td className="py-4">
                           <div className="font-bold text-sm">{u.username}</div>
                           <div className="text-[10px] text-white/20">{u.id}</div>
                         </td>
                         <td className="py-4">
-                          {u.isAdmin ? (
+                          {u.is_admin ? (
                             <span className="bg-red-600/20 text-red-500 text-[10px] font-black px-2 py-1 rounded uppercase">Admin</span>
-                          ) : u.isVip ? (
+                          ) : isVipActive ? (
                             <div className="flex flex-col gap-1 items-start">
-                              <span className="bg-green-600/20 text-green-500 text-[10px] font-black px-2 py-1 rounded uppercase">VIP ({u.vipDays} dias)</span>
-                              <span className="text-[9px] text-white/40">Expira: {new Date(new Date(u.createdAt).getTime() + u.vipDays * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')}</span>
+                              <span className="bg-green-600/20 text-green-500 text-[10px] font-black px-2 py-1 rounded uppercase">VIP Ativo</span>
+                              {u.vip_until && <span className="text-[9px] text-white/40">Expira: {new Date(u.vip_until).toLocaleDateString('pt-BR')}</span>}
+                            </div>
+                          ) : isExpired ? (
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="bg-yellow-600/20 text-yellow-500 text-[10px] font-black px-2 py-1 rounded uppercase">VIP Expirado</span>
+                              <span className="text-[9px] text-white/40">Expirou: {new Date(u.vip_until).toLocaleDateString('pt-BR')}</span>
                             </div>
                           ) : (
-                            <span className="bg-white/5 text-white/40 text-[10px] font-black px-2 py-1 rounded uppercase">Grátis</span>
+                            <span className="bg-white/5 text-white/40 text-[10px] font-black px-2 py-1 rounded uppercase">Bloqueado / Grátis</span>
                           )}
                         </td>
                         <td className="py-4">
                           <div className="flex items-center gap-2 flex-wrap">
-                            {!u.isAdmin && (
+                            {!u.is_admin && (
                               <div className="flex items-center gap-2">
                                 <div className="flex flex-col gap-1">
                                   <span className="text-[8px] text-white/40 uppercase tracking-widest">Nova Validade</span>
@@ -2134,16 +2214,14 @@ export default function App() {
                                   }}
                                   className="bg-green-600 hover:bg-green-700 text-white text-[10px] font-black px-3 py-2 rounded uppercase transition-all mt-3"
                                 >
-                                  {u.isVip ? 'Renovar VIP' : 'Liberar VIP'}
+                                  Renovar VIP
                                 </button>
-                                {u.isVip && (
-                                  <button
-                                    onClick={() => updateVip(u.id, 0, false)}
-                                    className="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white text-[10px] font-black px-3 py-2 rounded uppercase transition-all border border-red-500/20 mt-3"
-                                  >
-                                    Remover VIP
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => updateVip(u.id, 0, false)}
+                                  className="bg-white/5 hover:bg-white/10 text-white/60 text-[10px] font-black px-3 py-2 rounded uppercase transition-all mt-3"
+                                >
+                                  Remover VIP
+                                </button>
                               </div>
                             )}
                             <button
@@ -2190,7 +2268,8 @@ export default function App() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

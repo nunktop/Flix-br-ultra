@@ -5,26 +5,44 @@ import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 
+declare global {
+  namespace Express {
+    interface Request {
+      user?: any;
+    }
+  }
+}
+
 const USERS_FILE = path.join(process.cwd(), "users.json");
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+const supabaseAdmin = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
 
-// Initialize users file if it doesn't exist (fallback)
-if (!fs.existsSync(USERS_FILE)) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify([
-    {
-      id: "admin",
-      username: "admin",
-      password: "admin",
-      isAdmin: true,
-      isVip: true,
-      vipDays: 9999,
-      createdAt: new Date().toISOString()
-    }
-  ]));
-}
+// Middleware to verify admin token
+const verifyAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!supabaseAdmin) {
+    return res.status(500).json({ error: "Supabase Admin not configured" });
+  }
+  
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !user) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+
+  const { data: profile } = await supabaseAdmin.from('profiles').select('is_admin').eq('id', user.id).single();
+  if (!profile?.is_admin) {
+    return res.status(403).json({ error: "Forbidden: Admins only" });
+  }
+
+  req.user = user;
+  next();
+};
 
 async function startServer() {
   const app = express();
@@ -32,157 +50,92 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API Routes
-  app.get("/api/users", async (req, res) => {
-    if (supabase) {
-      const { data, error } = await supabase.from('users').select('*');
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json(data || []);
-    }
-    const users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-    res.json(users);
-  });
+  // --- ADMIN API ROUTES ---
 
-  app.post("/api/users/update-vip", async (req, res) => {
-    const { userId, days, isVip } = req.body;
-    const createdAt = new Date().toISOString();
-
-    if (supabase) {
-      const updateData: any = { createdAt };
-      if (isVip !== undefined) updateData.isVip = isVip;
-      else updateData.isVip = true;
-      if (days !== undefined) updateData.vipDays = days;
-
-      const { error } = await supabase.from('users').update(updateData).eq('id', userId);
-      if (error) return res.status(500).json({ success: false, message: error.message });
-      return res.json({ success: true });
-    }
-
-    const users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-    const userIndex = users.findIndex((u: any) => u.id === userId);
-
-    if (userIndex !== -1) {
-      if (isVip !== undefined) users[userIndex].isVip = isVip;
-      else users[userIndex].isVip = true;
-      if (days !== undefined) users[userIndex].vipDays = days;
-      
-      users[userIndex].createdAt = createdAt;
-      fs.writeFileSync(USERS_FILE, JSON.stringify(users));
-      res.json({ success: true });
-    } else {
-      res.status(404).json({ success: false, message: "Usuário não encontrado" });
-    }
-  });
-
-  app.post("/api/users/login", async (req, res) => {
-    const { username, password } = req.body;
-
-    if (supabase) {
-      const { data: user, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('username', username)
-        .eq('password', password)
-        .single();
-        
-      if (error || !user) {
-        return res.status(401).json({ success: false, message: "Usuário ou senha incorretos" });
-      }
-      return res.json({ success: true, user });
-    }
-
-    const users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-    const user = users.find((u: any) => u.username === username && u.password === password);
+  app.get("/api/admin/users", verifyAdmin, async (req, res) => {
+    if (!supabaseAdmin) return res.status(500).json({ error: "Supabase Admin not configured" });
     
-    if (user) {
-      res.json({ success: true, user });
-    } else {
-      res.status(401).json({ success: false, message: "Usuário ou senha incorretos" });
-    }
+    // Fetch profiles
+    const { data: profiles, error } = await supabaseAdmin.from('profiles').select('*').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    
+    res.json(profiles || []);
   });
 
-  app.post("/api/users/create", async (req, res) => {
-    const { username, password, isAdmin, isVip, vipDays } = req.body;
-    const newUser = {
-      id: Math.random().toString(36).substr(2, 9),
-      username,
+  app.post("/api/admin/users/vip", verifyAdmin, async (req, res) => {
+    if (!supabaseAdmin) return res.status(500).json({ error: "Supabase Admin not configured" });
+    
+    const { userId, isVip, vipUntil } = req.body;
+    
+    const { error } = await supabaseAdmin.from('profiles').update({ 
+      is_vip: isVip,
+      vip_until: vipUntil
+    }).eq('id', userId);
+    
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true });
+  });
+
+  app.post("/api/admin/users/create", verifyAdmin, async (req, res) => {
+    if (!supabaseAdmin) return res.status(500).json({ error: "Supabase Admin not configured" });
+    
+    const { email, password, isAdmin, isVip, vipUntil } = req.body;
+    
+    // Create user in auth.users
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
       password,
-      isAdmin: !!isAdmin,
-      isVip: !!isVip,
-      vipDays: parseInt(vipDays) || 0,
-      createdAt: new Date().toISOString()
-    };
-
-    if (supabase) {
-      // Check if user exists
-      const { data: existing } = await supabase.from('users').select('id').eq('username', username).single();
-      if (existing) return res.status(400).json({ success: false, message: "Usuário já cadastrado" });
-
-      const { error } = await supabase.from('users').insert([newUser]);
-      if (error) return res.status(500).json({ success: false, message: error.message });
-      return res.json({ success: true, user: newUser });
-    }
-
-    const users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-    if (users.find((u: any) => u.username === username)) {
-      return res.status(400).json({ success: false, message: "Usuário já cadastrado" });
-    }
-
-    users.push(newUser);
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users));
-    res.json({ success: true, user: newUser });
-  });
-
-  app.post("/api/users/reset-password", async (req, res) => {
-    const { userId, newPassword } = req.body;
-
-    if (supabase) {
-      const { error } = await supabase.from('users').update({ password: newPassword }).eq('id', userId);
-      if (error) return res.status(500).json({ success: false, message: error.message });
-      return res.json({ success: true });
-    }
-
-    const users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-    const userIndex = users.findIndex((u: any) => u.id === userId);
-
-    if (userIndex !== -1) {
-      users[userIndex].password = newPassword;
-      fs.writeFileSync(USERS_FILE, JSON.stringify(users));
-      res.json({ success: true });
-    } else {
-      res.status(404).json({ success: false, message: "Usuário não encontrado" });
-    }
-  });
-
-  app.delete("/api/users/:id", async (req, res) => {
-    const { id } = req.params;
-
-    if (supabase) {
-      const { data: users } = await supabase.from('users').select('*');
-      if (!users) return res.status(500).json({ success: false, message: "Erro ao buscar usuários" });
+      email_confirm: true
+    });
+    
+    if (authError) return res.status(400).json({ success: false, message: authError.message });
+    
+    // The trigger will create the profile, but we need to update it with admin/vip status
+    if (authData.user) {
+      // Wait a moment for the trigger to run
+      await new Promise(resolve => setTimeout(resolve, 500));
       
-      const user = users.find((u: any) => u.id === id);
-      if (user && user.isAdmin && users.filter((u: any) => u.isAdmin).length <= 1) {
-        return res.status(400).json({ success: false, message: "Não é possível excluir o único administrador" });
-      }
-
-      const { error } = await supabase.from('users').delete().eq('id', id);
-      if (error) return res.status(500).json({ success: false, message: error.message });
-      return res.json({ success: true });
+      const { error: profileError } = await supabaseAdmin.from('profiles').update({
+        is_admin: isAdmin,
+        is_vip: isVip,
+        vip_until: vipUntil
+      }).eq('id', authData.user.id);
+      
+      if (profileError) console.error("Error updating profile roles:", profileError);
     }
-
-    let users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-    const user = users.find((u: any) => u.id === id);
-
-    if (user && user.isAdmin && users.filter((u: any) => u.isAdmin).length <= 1) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir o único administrador" });
-    }
-
-    users = users.filter((u: any) => u.id !== id);
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users));
-    res.json({ success: true });
+    
+    return res.json({ success: true, user: authData.user });
   });
 
+  app.post("/api/admin/users/reset-password", verifyAdmin, async (req, res) => {
+    if (!supabaseAdmin) return res.status(500).json({ error: "Supabase Admin not configured" });
+    
+    const { userId, newPassword } = req.body;
+    
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword
+    });
+    
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true });
+  });
+
+  app.delete("/api/admin/users/:id", verifyAdmin, async (req, res) => {
+    if (!supabaseAdmin) return res.status(500).json({ error: "Supabase Admin not configured" });
+    
+    const { id } = req.params;
+    
+    // Prevent deleting self
+    if (req.user?.id === id) {
+      return res.status(400).json({ success: false, message: "Você não pode excluir sua própria conta." });
+    }
+    
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(id);
+    if (error) return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true });
+  });
+
+  // --- AI ROUTES ---
   app.post("/api/ai/magic-search", async (req, res) => {
     try {
       const { magicSearchQuery, context } = req.body;
