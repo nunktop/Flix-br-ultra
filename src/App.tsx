@@ -172,11 +172,12 @@ export default function App() {
         body: JSON.stringify({ userId, isVip: isVip !== false, vipUntil })
       });
       const data = await res.json();
-      if (data.success) {
-        fetchAdminUsers();
-      }
-    } catch (err) {
-      console.error("Erro ao atualizar VIP");
+      if (!res.ok || !data.success) throw new Error(data.message || data.error || "Failed to update VIP");
+      fetchAdminUsers();
+      alert("Status VIP atualizado!");
+    } catch (err: any) {
+      console.error("Erro ao atualizar VIP", err);
+      alert("Erro ao atualizar VIP: " + err.message);
     }
   };
 
@@ -189,13 +190,12 @@ export default function App() {
         headers
       });
       const data = await res.json();
-      if (data.success) {
-        fetchAdminUsers();
-      } else {
-        alert(data.message);
-      }
-    } catch (err) {
-      console.error("Erro ao excluir usuário");
+      if (!res.ok || !data.success) throw new Error(data.message || data.error || "Failed to delete user");
+      fetchAdminUsers();
+      alert("Usuário excluído com sucesso.");
+    } catch (err: any) {
+      console.error("Erro ao excluir usuário", err);
+      alert("Erro ao excluir usuário: " + err.message);
     }
   };
 
@@ -209,13 +209,14 @@ export default function App() {
         body: JSON.stringify({ userId, newPassword: newPasswordValue })
       });
       const data = await res.json();
-      if (data.success) {
-        setResettingPasswordFor(null);
-        setNewPasswordValue("");
-        fetchAdminUsers();
-      }
-    } catch (err) {
-      console.error("Erro ao resetar senha");
+      if (!res.ok || !data.success) throw new Error(data.message || data.error || "Failed to reset password");
+      setResettingPasswordFor(null);
+      setNewPasswordValue("");
+      fetchAdminUsers();
+      alert("Senha redefinida com sucesso.");
+    } catch (err: any) {
+      console.error("Erro ao resetar senha", err);
+      alert("Erro ao resetar senha: " + err.message);
     }
   };
 
@@ -243,19 +244,19 @@ export default function App() {
         })
       });
       const data = await res.json();
-      if (data.success) {
-        fetchAdminUsers();
-        setShowNewUserForm(false);
-        setNewUserUsername("");
-        setNewUserPassword("");
-        setNewUserIsAdmin(false);
-        setNewUserIsVip(false);
-        setNewUserVipDays(30);
-      } else {
-        alert(data.message);
-      }
-    } catch (err) {
-      console.error("Erro ao criar usuário");
+      if (!res.ok || !data.success) throw new Error(data.message || data.error || "Failed to create user");
+      
+      fetchAdminUsers();
+      setShowNewUserForm(false);
+      setNewUserUsername("");
+      setNewUserPassword("");
+      setNewUserIsAdmin(false);
+      setNewUserIsVip(false);
+      setNewUserVipDays(30);
+      alert("Usuário criado com sucesso!");
+    } catch (err: any) {
+      console.error("Erro ao criar usuário:", err);
+      alert("Erro ao criar usuário: " + err.message);
     }
   };
 
@@ -600,7 +601,12 @@ export default function App() {
 
       if (bestMatch) {
         (bestMatch as HTMLElement).focus();
-        (bestMatch as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        
+        // Let natural CSS scroll snapping or the onFocusCapture handle horizontal scrolling in rows.
+        // For vertical, we can scroll the whole page to keep the selected row centered.
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+           (bestMatch as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
       }
     };
 
@@ -1097,7 +1103,7 @@ export default function App() {
 
           <div 
             ref={scrollRef}
-            className="flex gap-4 md:gap-8 overflow-x-auto no-scrollbar pb-8 -mx-4 px-4 md:mx-0 md:px-0 scroll-smooth snap-x snap-mandatory"
+            className="flex gap-4 md:gap-8 overflow-x-auto no-scrollbar pb-8 -mx-4 px-4 md:mx-0 md:px-0 scroll-smooth"
             onFocusCapture={(e) => {
               // Ensure the focused element scrolls into view smoothly within the container
               if (scrollRef.current && e.target instanceof HTMLElement) {
@@ -1113,7 +1119,7 @@ export default function App() {
             }}
           >
             {items.map(item => (
-              <div key={item.id} className="snap-start shrink-0">
+              <div key={item.id} className="shrink-0">
                 <MediaCard item={item} onClick={onMediaClick} />
               </div>
             ))}

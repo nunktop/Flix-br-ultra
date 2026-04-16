@@ -55,9 +55,40 @@ async function startServer() {
   app.get("/api/admin/users", verifyAdmin, async (req, res) => {
     if (!supabaseAdmin) return res.status(500).json({ error: "Supabase Admin not configured" });
     
+    // Sync missing profiles from auth.users (repair mechanism for broken triggers)
+    try {
+      const { data: authData } = await supabaseAdmin.auth.admin.listUsers();
+      if (authData?.users) {
+        const { data: existingProfiles } = await supabaseAdmin.from('profiles').select('id');
+        const profileIds = new Set(existingProfiles?.map((p: any) => p.id) || []);
+        
+        const missingUsers = authData.users.filter((u: any) => !profileIds.has(u.id));
+        
+        for (const u of missingUsers) {
+          const isAdmin = u.user_metadata?.is_admin === true;
+          const isVip = u.user_metadata?.is_vip === true;
+          const vipUntil = u.user_metadata?.vip_until || null;
+          
+          await supabaseAdmin.from('profiles').insert({
+             id: u.id,
+             username: u.email?.split('@')[0] || 'User',
+             is_admin: isAdmin,
+             is_vip: isVip,
+             vip_until: vipUntil
+          });
+          console.log(`Synced missing profile for user: ${u.email}`);
+        }
+      }
+    } catch(e) {
+      console.error("Error syncing users to profiles:", e);
+    }
+    
     // Fetch profiles
-    const { data: profiles, error } = await supabaseAdmin.from('profiles').select('*').order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+    const { data: profiles, error } = await supabaseAdmin.from('profiles').select('*');
+    if (error) {
+      console.error("Error fetching profiles:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
     
     res.json(profiles || []);
   });
@@ -97,16 +128,22 @@ async function startServer() {
     
     // The trigger will create the profile, but we need to update it with admin/vip status
     if (authData.user) {
-      // Wait a moment for the trigger to run
+      // Wait a moment for the trigger to run (if it exists)
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      const { error: profileError } = await supabaseAdmin.from('profiles').update({
+      // Use upsert to create or update the profile
+      const { error: profileError } = await supabaseAdmin.from('profiles').upsert({
+        id: authData.user.id,
+        username: email.split('@')[0],
         is_admin: isAdmin,
         is_vip: isVip,
         vip_until: vipUntil
-      }).eq('id', authData.user.id);
+      }, { onConflict: 'id' });
       
-      if (profileError) console.error("Error updating profile roles:", profileError);
+      if (profileError) {
+        console.error("Error upserting profile:", profileError);
+        return res.status(500).json({ success: false, message: "Erro ao criar perfil. Verifique as tabelas do banco de dados.", error: profileError.message });
+      }
     }
     
     return res.json({ success: true, user: authData.user });

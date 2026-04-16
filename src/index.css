@@ -50,15 +50,15 @@
 
   /* TV Mode Optimizations */
   .tv-mode {
-    font-size: 1.25rem;
+    /* Removed the global 1.25rem font-size to prevent catastrophic layout breaking */
   }
 
   .tv-mode *:focus-visible,
   .tv-mode *:focus {
     outline: 4px solid #dc2626 !important; /* Tailwind red-600 */
     outline-offset: 4px !important;
-    transform: scale(1.05);
-    transition: all 0.2s ease-in-out;
+    transform: scale(1.03); /* Tone down scale slightly */
+    transition: transform 0.15s ease-out, outline 0.1s ease-in, box-shadow 0.15s ease-out;
     z-index: 50;
     box-shadow: 0 0 20px rgba(220, 38, 38, 0.6) !important;
   }
@@ -77,19 +77,7 @@
     opacity: 1 !important;
   }
 
-  .tv-mode .media-card {
-    width: 320px;
-  }
-
-  .tv-mode button, .tv-mode a {
-    @apply px-6 py-3;
-  }
-
-  @media (min-width: 1024px) {
-    .tv-mode .media-card {
-      width: 360px;
-    }
-  }
+  /* Removed fixed heavy dimensions for .tv-mode .media-card and .tv-mode button to let Tailwind responsive classes breathe */
 }
 
 @layer utilities {
