@@ -85,7 +85,12 @@ async function startServer() {
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true
+      email_confirm: true,
+      user_metadata: {
+        is_admin: isAdmin,
+        is_vip: isVip,
+        vip_until: vipUntil
+      }
     });
     
     if (authError) return res.status(400).json({ success: false, message: authError.message });
@@ -93,7 +98,7 @@ async function startServer() {
     // The trigger will create the profile, but we need to update it with admin/vip status
     if (authData.user) {
       // Wait a moment for the trigger to run
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       const { error: profileError } = await supabaseAdmin.from('profiles').update({
         is_admin: isAdmin,

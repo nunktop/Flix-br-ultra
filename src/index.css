@@ -63,6 +63,12 @@
     box-shadow: 0 0 20px rgba(220, 38, 38, 0.6) !important;
   }
 
+  .tv-mode iframe:focus {
+    transform: scale(1) !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
   .tv-mode input:focus {
     transform: scale(1.02);
   }

@@ -38,7 +38,15 @@ export function AuthForm({ onClose, onSuccess }: AuthFormProps) {
       
       if (onSuccess) onSuccess();
     } catch (err: any) {
-      setError(err.message || 'Ocorreu um erro na autenticação.');
+      let errorMessage = err.message || 'Ocorreu um erro na autenticação.';
+      if (errorMessage.toLowerCase().includes('invalid login credentials')) {
+        errorMessage = 'E-mail ou senha incorretos.';
+      } else if (errorMessage.toLowerCase().includes('email not confirmed')) {
+        errorMessage = 'Por favor, confirme seu e-mail antes de fazer login.';
+      } else if (errorMessage.toLowerCase().includes('already registered')) {
+        errorMessage = 'Este e-mail já está cadastrado.';
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

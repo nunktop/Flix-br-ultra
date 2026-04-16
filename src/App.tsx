@@ -119,7 +119,20 @@ export default function App() {
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [isTvMode, setIsTvMode] = useState(localStorage.getItem("tvMode") === "true");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showVipModal, setShowVipModal] = useState(false);
 
+  const checkVipAccess = () => {
+    if (user?.isAdmin) return true;
+    if (user?.isVip) {
+      if (!user.vipUntil) return true;
+      if (new Date(user.vipUntil) > new Date()) return true;
+    }
+    return false;
+  };
+
+  const fechar = useCallback(() => {
+    setIsPlayerOpen(false);
+  }, []);
 
   const getAuthHeaders = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -561,20 +574,22 @@ export default function App() {
         const dx = elCenterX - currentCenterX;
         const dy = elCenterY - currentCenterY;
 
-        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        // Calculate overlap to prioritize straight lines (grid items)
+        const overlapY = Math.max(0, Math.min(currentRect.bottom, rect.bottom) - Math.max(currentRect.top, rect.top));
+        const overlapX = Math.max(0, Math.min(currentRect.right, rect.right) - Math.max(currentRect.left, rect.left));
 
-        if (e.key === 'ArrowRight' && Math.abs(angle) <= 45) {
+        if (e.key === 'ArrowRight' && dx > 0) {
           isDirectionMatch = true;
-          distance = Math.sqrt(dx * dx + dy * dy * 4);
-        } else if (e.key === 'ArrowLeft' && Math.abs(angle) >= 135) {
+          distance = dx + (overlapY > 0 ? 0 : Math.abs(dy) * 10);
+        } else if (e.key === 'ArrowLeft' && dx < 0) {
           isDirectionMatch = true;
-          distance = Math.sqrt(dx * dx + dy * dy * 4);
-        } else if (e.key === 'ArrowDown' && angle > 45 && angle < 135) {
+          distance = Math.abs(dx) + (overlapY > 0 ? 0 : Math.abs(dy) * 10);
+        } else if (e.key === 'ArrowDown' && dy > 0) {
           isDirectionMatch = true;
-          distance = Math.sqrt(dx * dx * 4 + dy * dy);
-        } else if (e.key === 'ArrowUp' && angle < -45 && angle > -135) {
+          distance = dy + (overlapX > 0 ? 0 : Math.abs(dx) * 10);
+        } else if (e.key === 'ArrowUp' && dy < 0) {
           isDirectionMatch = true;
-          distance = Math.sqrt(dx * dx * 4 + dy * dy);
+          distance = Math.abs(dy) + (overlapX > 0 ? 0 : Math.abs(dx) * 10);
         }
 
         if (isDirectionMatch && distance < minDistance) {
@@ -597,7 +612,14 @@ export default function App() {
     // Smart TV Back Button Handler
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Backspace') {
-        if (isPlayerOpen) {
+        // Only target inputs inside modals IF they have focus (search bar has ignore built-in but still)
+        const isInput = document.activeElement?.tagName === 'INPUT';
+        if (isInput && e.key === 'Backspace') return; 
+
+        if (isSeasonMenuOpen || isEpisodeMenuOpen) {
+          setIsSeasonMenuOpen(false);
+          setIsEpisodeMenuOpen(false);
+        } else if (isPlayerOpen) {
           fechar();
         } else if (isFullMenuOpen) {
           setIsFullMenuOpen(false);
@@ -622,7 +644,7 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('scroll', handleScroll);
     };
-  }, [fetchGenres, loadHomeSections, isPlayerOpen, isFullMenuOpen, searchQuery, selectedGenre, specialCategory, showContinue]);
+  }, [fetchGenres, loadHomeSections, isPlayerOpen, isFullMenuOpen, searchQuery, selectedGenre, specialCategory, showContinue, fechar, isSeasonMenuOpen, isEpisodeMenuOpen]);
 
   // Debounce search
   useEffect(() => {
@@ -672,6 +694,11 @@ export default function App() {
   };
 
   const assistir = (item: MediaItem) => {
+    if (!checkVipAccess()) {
+      setShowVipModal(true);
+      return;
+    }
+
     const tipo = item.media_type || (item.title ? "movie" : "tv");
     
     // Check if it's already in continue watching to resume from where it was
@@ -695,9 +722,41 @@ export default function App() {
     updateContinueWatching(item, newState);
   };
 
-  const fechar = () => {
-    setIsPlayerOpen(false);
-  };
+  // Hardware Back Button (TV/Mobile) Support
+  useEffect(() => {
+    if (isPlayerOpen) {
+      // Auto-focus player on TV
+      if (isTvMode) {
+        const timer = setTimeout(() => {
+          const iframe = document.querySelector('iframe[title="Video Player"]') as HTMLIFrameElement;
+          if (iframe) iframe.focus();
+        }, 800);
+        
+        // Return a cleanup to avoid duplicate focus if user escapes early
+        // We also need to keep the pushState logic intact, but not run it every time `atual` changes
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isPlayerOpen, isTvMode, atual]); // Auto-focus whenever the current playing item changes
+
+  useEffect(() => {
+    if (isPlayerOpen) {
+      // Add a history entry when player opens
+      window.history.pushState({ playerOpen: true }, '');
+      
+      const handlePopState = (e: PopStateEvent) => {
+        if (isPlayerOpen) {
+          e.preventDefault();
+          fechar();
+        }
+      };
+      
+      window.addEventListener('popstate', handlePopState);
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+      };
+    }
+  }, [isPlayerOpen, fechar]);
 
   const proximoEp = useCallback(() => {
     if (atual.tipo !== "tv") return;
@@ -758,12 +817,16 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isPlayerOpen) {
-        if (e.key === 'Escape') fechar();
+      // Escape and Backspace are handled by the Smart TV Back Button Handler
+      
+      // We only want to handle keyboard shortcuts for active inputs if we aren't typing
+      const isTyping = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
+      
+      if (isPlayerOpen && !isTyping) {
         if (e.key === 'n' || e.key === 'N') proximoEp();
         if (e.key === 'p' || e.key === 'P') anteriorEp();
         if (e.key === 's' || e.key === 'S') trocarServidor();
-      } else {
+      } else if (!isPlayerOpen) {
         if (e.key === '/' && !isMagicSearching) {
           e.preventDefault();
           document.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
@@ -873,6 +936,10 @@ export default function App() {
       const result = await response.json();
 
       if (result.id) {
+        if (!checkVipAccess()) {
+          setShowVipModal(true);
+          return;
+        }
         if (result.isUrl) {
           setAtual({ id: result.id, tipo: result.type, season: 1, ep: 1, title: result.title });
           setCustomServerUrl(result.id);
@@ -1010,7 +1077,7 @@ export default function App() {
         
         <div className="relative">
           <AnimatePresence>
-            {showArrows && (
+            {showArrows && !isTvMode && (
               <>
                 <button 
                   onClick={(e) => { e.stopPropagation(); manualScroll('left'); }}
@@ -1449,19 +1516,6 @@ export default function App() {
                 <h3 className="text-red-600 font-black uppercase tracking-[0.3em] text-sm">Configurações</h3>
                 <div className="flex flex-col gap-4">
                   <button 
-                    onClick={toggleTvMode}
-                    className="flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-2xl transition-all group focus:outline-none focus:ring-2 focus:ring-red-600"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Tv className={`w-5 h-5 ${isTvMode ? 'text-red-600' : 'text-white/40'}`} />
-                      <span className="text-sm font-bold uppercase tracking-widest">Modo TV</span>
-                    </div>
-                    <div className={`w-10 h-5 rounded-full transition-all relative ${isTvMode ? 'bg-red-600' : 'bg-white/10'}`}>
-                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${isTvMode ? 'left-6' : 'left-1'}`} />
-                    </div>
-                  </button>
-
-                  <button 
                     onClick={() => setShowClearConfirm(true)}
                     className="flex items-center gap-3 text-white/40 hover:text-red-500 transition-colors text-left font-bold focus:outline-none focus:text-red-500 focus:ring-2 focus:ring-red-500 rounded-md p-2 -ml-2"
                   >
@@ -1492,8 +1546,9 @@ export default function App() {
       <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-xl border-b border-white/5 px-4 md:px-8 py-4 flex flex-col lg:flex-row items-center justify-between gap-6">
         <div className="flex items-center gap-6 w-full lg:w-auto justify-between lg:justify-start">
           <button 
-            className="flex items-center gap-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-600 rounded-lg p-1 transition-all active:scale-95" 
+            className="flex items-center gap-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-600 rounded-lg p-1 transition-all active:scale-95 hover:bg-white/5" 
             onClick={() => setIsFullMenuOpen(true)}
+            title="Menu Completo"
           >
             <span className="text-2xl font-black tracking-tighter text-red-600 italic">Flix BR</span>
             <span className="bg-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest">Ultra+</span>
@@ -1509,16 +1564,31 @@ export default function App() {
                 Painel VIP
               </button>
             )}
+            
+            <button 
+              onClick={toggleTvMode}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-red-600 border ${isTvMode ? 'bg-red-600/20 text-red-500 border-red-500/30' : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white'}`}
+              title="Alternar Modo TV"
+            >
+              <Tv className="w-4 h-4" />
+              <span className="text-[10px] font-black uppercase tracking-widest hidden md:inline">Modo TV</span>
+              <div className={`w-6 h-3 rounded-full transition-all relative ml-1 ${isTvMode ? 'bg-red-600' : 'bg-white/20'}`}>
+                <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-all ${isTvMode ? 'left-3.5' : 'left-0.5'}`} />
+              </div>
+            </button>
+
             <button 
               onClick={handleLogout}
               className="text-xs font-bold text-white/60 hover:text-white transition-all focus:outline-none focus:ring-2 focus:ring-white/20 rounded-md px-2 py-1 flex items-center gap-1"
             >
               <LogOut className="w-3 h-3" />
-              Sair
+              <span className="hidden md:inline">Sair</span>
             </button>
           </div>
+        </div>
 
-          <nav className={`hidden md:flex items-center gap-6 text-sm font-bold text-white/60 uppercase tracking-wider ${isTvMode ? 'text-lg gap-10' : ''}`}>
+        <div className="flex items-center gap-4 w-full lg:w-auto overflow-x-auto no-scrollbar pb-2 lg:pb-0">
+          <nav className={`flex items-center gap-4 md:gap-6 text-sm font-bold text-white/60 uppercase tracking-wider shrink-0 ${isTvMode ? 'text-lg gap-10 lg:gap-14' : ''}`}>
             <button 
               onClick={() => { setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
               className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${mediaType === 'all' && !selectedGenre && !searchQuery && !specialCategory && !showContinue ? 'text-white scale-110' : ''}`}
@@ -1609,7 +1679,13 @@ export default function App() {
 
           {atual.id && !isPlayerOpen && (
             <button 
-              onClick={() => setIsPlayerOpen(true)}
+              onClick={() => {
+                if (!checkVipAccess()) {
+                  setShowVipModal(true);
+                  return;
+                }
+                setIsPlayerOpen(true);
+              }}
               className="flex items-center gap-2 text-[10px] md:text-xs font-bold uppercase tracking-wider text-red-500 hover:text-red-400 transition-colors bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500"
             >
               <History className="w-3 h-3 md:w-4 h-4" />
@@ -1825,6 +1901,35 @@ export default function App() {
                   Confirmar
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* VIP Block Modal */}
+        {showVipModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#141414] border border-red-600/30 p-8 rounded-2xl max-w-md w-full text-center shadow-[0_0_50px_rgba(220,38,38,0.15)]"
+            >
+              <Star className="w-16 h-16 text-red-600 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(220,38,38,0.5)]" />
+              <h2 className="text-2xl font-black mb-4 text-white uppercase tracking-tight">Acesso VIP Necessário</h2>
+              <p className="text-white/60 mb-8">
+                Para assistir a este conteúdo, você precisa ser um usuário VIP. Entre em contato com o administrador para liberar seu acesso.
+              </p>
+              <button 
+                onClick={() => setShowVipModal(false)}
+                className="w-full py-4 rounded font-black bg-red-600 hover:bg-red-700 transition-colors uppercase tracking-widest text-sm"
+              >
+                Entendi
+              </button>
             </motion.div>
           </motion.div>
         )}
