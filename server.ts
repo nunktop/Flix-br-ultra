@@ -4,6 +4,9 @@ import path from "path";
 import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 declare global {
   namespace Express {
@@ -15,9 +18,9 @@ declare global {
 
 const USERS_FILE = path.join(process.cwd(), "users.json");
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
-const supabaseAdmin = supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
+const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://sgpheellaheyizlunyoz.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNncGhlZWxsYWhleWl6bHVueW96Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1NjQyNzcsImV4cCI6MjA5MTE0MDI3N30.f9HRVlf3S3-9laqm4VCTYYwicvf7-fJEw_Wngo-K92Y';
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
 // Middleware to verify admin token
 const verifyAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -26,13 +29,15 @@ const verifyAdmin = async (req: express.Request, res: express.Response, next: ex
   }
   
   const token = req.headers.authorization?.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ error: "Unauthorized" });
+  if (!token || token === "undefined" || token === "null") {
+    return res.status(401).json({ error: "No token provided. Você não possui uma sessão ativa." });
   }
 
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !user) {
-    return res.status(401).json({ error: "Invalid token" });
+    const errorMsg = error?.message || "Usuário não encontrado";
+    console.error(`Token verificação falhou. URL server: ${supabaseUrl}. Erro:`, errorMsg, "Token:", token.substring(0, 15) + "...");
+    return res.status(401).json({ error: `Sessão inválida ou expirada. Original erro: ${errorMsg}` });
   }
 
   const { data: profile } = await supabaseAdmin.from('profiles').select('is_admin').eq('id', user.id).single();
@@ -98,12 +103,31 @@ async function startServer() {
     
     const { userId, isVip, vipUntil } = req.body;
     
-    const { error } = await supabaseAdmin.from('profiles').update({ 
-      is_vip: isVip,
-      vip_until: vipUntil
-    }).eq('id', userId);
+    // First, try a simple update
+    const { data: updateData, error: updateError } = await supabaseAdmin
+      .from('profiles')
+      .update({ is_vip: isVip, vip_until: vipUntil })
+      .eq('id', userId)
+      .select();
+      
+    // If update affected 0 rows (missing profile), handle creation manually
+    if (!updateError && (!updateData || updateData.length === 0)) {
+      console.log(`Profile missing for ${userId} during VIP update. Attempting full upsert.`);
+      const { data: authData } = await supabaseAdmin.auth.admin.getUserById(userId);
+      
+      const { error: insertError } = await supabaseAdmin.from('profiles').upsert({
+        id: userId,
+        username: authData?.user?.email?.split('@')[0] || 'User',
+        is_admin: false,
+        is_vip: isVip,
+        vip_until: vipUntil
+      });
+      
+      if (insertError) return res.status(500).json({ success: false, message: "Erro ao forçar criação do perfil: " + insertError.message });
+      return res.json({ success: true, message: "Perfil criado e atualizado." });
+    }
     
-    if (error) return res.status(500).json({ success: false, message: error.message });
+    if (updateError) return res.status(500).json({ success: false, message: updateError.message });
     return res.json({ success: true });
   });
 

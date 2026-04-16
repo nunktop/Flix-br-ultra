@@ -135,7 +135,15 @@ export default function App() {
   }, []);
 
   const getAuthHeaders = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    let { data: { session }, error } = await supabase.auth.getSession();
+    
+    // If there's an error getting session or no session, try forcing a fresh one or login
+    if (error || !session) {
+      const { data: refreshedSession } = await supabase.auth.refreshSession();
+      session = refreshedSession.session;
+    }
+    
+    // If it's still invalid, it will send undefined, backend will return 401.
     return {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${session?.access_token}`
@@ -146,30 +154,27 @@ export default function App() {
     try {
       const headers = await getAuthHeaders();
       const res = await fetch("/api/admin/users", { headers });
-      if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.message || "Failed to fetch");
       setAdminUsers(data);
-    } catch (err) {
-      console.error("Erro ao buscar usuários");
+    } catch (err: any) {
+      console.error("Erro ao buscar usuários:", err);
+      if (err.message?.includes("Sessão inválida")) {
+        alert(err.message + " (Por favor, saia do sistema e faça login novamente)");
+      } else {
+        alert("Erro ao buscar usuários: " + err.message);
+      }
     }
   };
 
-  const updateVip = async (userId: string, days: number, isVip?: boolean) => {
+  const updateVip = async (userId: string, vipUntilDate: string | null, isVip?: boolean) => {
     try {
       const headers = await getAuthHeaders();
       
-      // Calculate new vip_until date
-      let vipUntil = null;
-      if (isVip !== false) {
-        const date = new Date();
-        date.setDate(date.getDate() + days);
-        vipUntil = date.toISOString();
-      }
-
       const res = await fetch("/api/admin/users/vip", {
         method: "POST",
         headers,
-        body: JSON.stringify({ userId, isVip: isVip !== false, vipUntil })
+        body: JSON.stringify({ userId, isVip: isVip !== false, vipUntil: vipUntilDate })
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || data.error || "Failed to update VIP");
@@ -256,7 +261,11 @@ export default function App() {
       alert("Usuário criado com sucesso!");
     } catch (err: any) {
       console.error("Erro ao criar usuário:", err);
-      alert("Erro ao criar usuário: " + err.message);
+      if (err.message.includes("Sessão inválida")) {
+        alert("Sua sessão de administrador expirou. Por favor, saia do sistema e faça login novamente.");
+      } else {
+        alert("Erro ao criar usuário: " + err.message);
+      }
     }
   };
 
@@ -2319,16 +2328,15 @@ export default function App() {
                                   onClick={() => {
                                     const dateVal = (document.getElementById(`date-${u.id}`) as HTMLInputElement).value;
                                     if (!dateVal) return;
-                                    const selectedDate = new Date(dateVal);
-                                    const days = Math.ceil((selectedDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-                                    updateVip(u.id, days > 0 ? days : 0, true);
+                                    const selectedDate = new Date(`${dateVal}T23:59:59`); // End of the selected day
+                                    updateVip(u.id, selectedDate.toISOString(), true);
                                   }}
                                   className="bg-green-600 hover:bg-green-700 text-white text-[10px] font-black px-3 py-2 rounded uppercase transition-all mt-3"
                                 >
                                   Renovar VIP
                                 </button>
                                 <button
-                                  onClick={() => updateVip(u.id, 0, false)}
+                                  onClick={() => updateVip(u.id, null, false)}
                                   className="bg-white/5 hover:bg-white/10 text-white/60 text-[10px] font-black px-3 py-2 rounded uppercase transition-all mt-3"
                                 >
                                   Remover VIP
