@@ -1483,6 +1483,11 @@ export default function App() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -100 }}
             className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex flex-col p-8 md:p-16"
+            onAnimationComplete={() => {
+              if (isTvMode) {
+                document.getElementById('close-full-menu')?.focus();
+              }
+            }}
           >
             <div className="flex items-center justify-between mb-12">
               <div className="flex items-center gap-2">
@@ -1490,6 +1495,7 @@ export default function App() {
                 <span className="bg-red-600 text-xs font-bold px-2 py-1 rounded uppercase tracking-widest">Ultra+</span>
               </div>
               <button 
+                id="close-full-menu"
                 onClick={() => setIsFullMenuOpen(false)}
                 className="p-4 bg-white/5 hover:bg-red-600 rounded-full transition-all focus:outline-none focus:ring-4 focus:ring-red-600"
               >
@@ -1982,11 +1988,17 @@ export default function App() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.05 }}
             className="fixed inset-0 z-50 bg-black flex flex-col"
+            onAnimationComplete={() => {
+              if (isTvMode) {
+                document.getElementById('player-iframe-focus')?.focus();
+              }
+            }}
           >
             {/* Player Header */}
             <div className="absolute top-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-b from-black/90 via-black/40 to-transparent z-[60] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
                 <button 
+                  id="close-player-btn"
                   onClick={fechar}
                   className="group flex items-center gap-2 bg-white/10 hover:bg-red-600 focus:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-600/50 backdrop-blur-md px-4 py-2.5 rounded-xl transition-all border border-white/10 active:scale-95 shadow-2xl"
                 >
@@ -2131,6 +2143,7 @@ export default function App() {
               
               {/* Sandbox added to block popups and improve flow */}
               <iframe
+                id="player-iframe-focus"
                 src={renderPlayerUrl()}
                 className="w-full h-full border-none focus:ring-4 focus:ring-red-600 focus:outline-none"
                 allowFullScreen

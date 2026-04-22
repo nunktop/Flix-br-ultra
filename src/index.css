@@ -50,17 +50,19 @@
 
   /* TV Mode Optimizations */
   .tv-mode {
-    /* Removed the global 1.25rem font-size to prevent catastrophic layout breaking */
+    /* Baseline for TV mode */
   }
 
+  /* Extreme focus visibility for Smart TVs per accessibility standards */
   .tv-mode *:focus-visible,
   .tv-mode *:focus {
-    outline: 4px solid #dc2626 !important; /* Tailwind red-600 */
+    outline: 5px solid white !important; /* Thick bright outline */
     outline-offset: 4px !important;
-    transform: scale(1.03); /* Tone down scale slightly */
-    transition: transform 0.15s ease-out, outline 0.1s ease-in, box-shadow 0.15s ease-out;
+    transform: scale(1.05); /* Noticeable pop effect */
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), outline 0.1s ease-in, box-shadow 0.2s ease-out;
     z-index: 50;
-    box-shadow: 0 0 20px rgba(220, 38, 38, 0.6) !important;
+    box-shadow: 0 0 30px rgba(255, 255, 255, 0.8), 0 0 15px rgba(220, 38, 38, 0.8) !important; /* Glow effect */
+    background-color: rgba(255, 255, 255, 0.1); 
   }
 
   .tv-mode iframe:focus {
@@ -71,6 +73,12 @@
 
   .tv-mode input:focus {
     transform: scale(1.02);
+    background-color: rgba(255, 255, 255, 0.2);
+  }
+
+  /* Make sure inputs don't look weird when focused */
+  .tv-mode input:focus::placeholder {
+    color: white;
   }
 
   .tv-mode .group:focus .group-hover\:opacity-100 {
