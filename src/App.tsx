@@ -543,7 +543,15 @@ export default function App() {
       // Ignore if inside iframe
       if (document.activeElement?.tagName === 'IFRAME') return;
 
-      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      let key = e.key;
+      // Polyfill for older Smart TVs (Tizen, WebOS)
+      if (key === 'Up' || e.keyCode === 38) key = 'ArrowUp';
+      if (key === 'Down' || e.keyCode === 40) key = 'ArrowDown';
+      if (key === 'Left' || e.keyCode === 37) key = 'ArrowLeft';
+      if (key === 'Right' || e.keyCode === 39) key = 'ArrowRight';
+      if (e.keyCode === 13) key = 'Enter';
+
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return;
 
       const activeElement = document.activeElement as HTMLElement;
       if (!activeElement || activeElement === document.body) {
@@ -552,7 +560,7 @@ export default function App() {
         return;
       }
 
-      if (activeElement.tagName === 'INPUT' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      if (activeElement.tagName === 'INPUT' && (key === 'ArrowLeft' || key === 'ArrowRight')) {
         return;
       }
 
@@ -588,16 +596,16 @@ export default function App() {
         const overlapY = Math.max(0, Math.min(currentRect.bottom, rect.bottom) - Math.max(currentRect.top, rect.top));
         const overlapX = Math.max(0, Math.min(currentRect.right, rect.right) - Math.max(currentRect.left, rect.left));
 
-        if (e.key === 'ArrowRight' && dx > 0) {
+        if (key === 'ArrowRight' && dx > 0) {
           isDirectionMatch = true;
           distance = dx + (overlapY > 0 ? 0 : Math.abs(dy) * 10);
-        } else if (e.key === 'ArrowLeft' && dx < 0) {
+        } else if (key === 'ArrowLeft' && dx < 0) {
           isDirectionMatch = true;
           distance = Math.abs(dx) + (overlapY > 0 ? 0 : Math.abs(dy) * 10);
-        } else if (e.key === 'ArrowDown' && dy > 0) {
+        } else if (key === 'ArrowDown' && dy > 0) {
           isDirectionMatch = true;
           distance = dy + (overlapX > 0 ? 0 : Math.abs(dx) * 10);
-        } else if (e.key === 'ArrowUp' && dy < 0) {
+        } else if (key === 'ArrowUp' && dy < 0) {
           isDirectionMatch = true;
           distance = Math.abs(dy) + (overlapX > 0 ? 0 : Math.abs(dx) * 10);
         }
@@ -613,7 +621,7 @@ export default function App() {
         
         // Let natural CSS scroll snapping or the onFocusCapture handle horizontal scrolling in rows.
         // For vertical, we can scroll the whole page to keep the selected row centered.
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (key === 'ArrowDown' || key === 'ArrowUp') {
            (bestMatch as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
         }
       }
@@ -626,10 +634,13 @@ export default function App() {
   useEffect(() => {
     // Smart TV Back Button Handler
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.key === 'Backspace') {
+      // 461 = LG WebOS Return, 10009 = Tizen Return
+      const isBackKey = e.key === 'Escape' || e.key === 'Backspace' || e.keyCode === 461 || e.keyCode === 10009;
+      
+      if (isBackKey) {
         // Only target inputs inside modals IF they have focus (search bar has ignore built-in but still)
         const isInput = document.activeElement?.tagName === 'INPUT';
-        if (isInput && e.key === 'Backspace') return; 
+        if (isInput && (e.key === 'Backspace' || e.keyCode === 8)) return; 
 
         if (isSeasonMenuOpen || isEpisodeMenuOpen) {
           setIsSeasonMenuOpen(false);
@@ -989,7 +1000,7 @@ export default function App() {
       animate={{ opacity: 1, scale: 1 }}
       whileHover={{ y: -10, scale: 1.05 }}
       whileFocus={{ y: -10, scale: 1.05 }}
-      className="relative aspect-[2/3] group cursor-pointer flex-shrink-0 w-32 sm:w-40 md:w-48 lg:w-56 rounded-2xl overflow-hidden outline-none focus:ring-4 focus:ring-red-600 focus:ring-offset-4 focus:ring-offset-black focus:z-50 transition-all"
+      className="relative aspect-[2/3] group cursor-pointer flex-shrink-0 w-full h-full rounded-2xl overflow-hidden outline-none focus:ring-4 focus:ring-red-600 focus:ring-offset-4 focus:ring-offset-black focus:z-50 transition-all"
       onClick={() => onClick(item)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -1128,7 +1139,7 @@ export default function App() {
             }}
           >
             {items.map(item => (
-              <div key={item.id} className="shrink-0">
+              <div key={item.id} className="shrink-0 w-28 sm:w-32 md:w-40 lg:w-48">
                 <MediaCard item={item} onClick={onMediaClick} />
               </div>
             ))}
@@ -1820,7 +1831,7 @@ export default function App() {
             </div>
             
             {continueWatching.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-8">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
                 {continueWatching.map(item => (
                   <div key={item.id} className="relative group">
                     <MediaCard item={item} onClick={assistir} />
@@ -1857,7 +1868,7 @@ export default function App() {
                selectedGenre ? genres.find(g => g.id === selectedGenre)?.name : 
                mediaType === 'movie' ? 'Filmes' : 'Séries'}
             </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-8">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
               {searchResults.map(item => <React.Fragment key={item.id}><MediaCard item={item} onClick={assistir} /></React.Fragment>)}
             </div>
           </div>
