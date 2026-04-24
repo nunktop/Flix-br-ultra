@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, X, Play, SkipForward, History, ChevronRight, ChevronLeft, Film, Tv, TrendingUp, Star, Server, Sparkles, AlertCircle, RefreshCcw, Bell, Maximize, Minimize, LogOut } from 'lucide-react';
+import { Search, X, Play, SkipForward, History, ChevronRight, ChevronLeft, Film, Tv, TrendingUp, Star, Server, Sparkles, AlertCircle, RefreshCcw, Bell, Maximize, Minimize, LogOut, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { AuthForm } from './components/AuthForm';
@@ -120,6 +120,7 @@ export default function App() {
   const [isTvMode, setIsTvMode] = useState(localStorage.getItem("tvMode") === "true");
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showVipModal, setShowVipModal] = useState(false);
+  const [focusedMedia, setFocusedMedia] = useState<MediaItem | null>(null);
 
   const checkVipAccess = () => {
     if (user?.isAdmin) return true;
@@ -395,6 +396,10 @@ export default function App() {
     try {
       // Fetch Trending
       const trendingData = await fetchWithCache(`${TMDB_BASE_URL}/trending/all/week?api_key=${TMDB_API_KEY}&language=pt-BR`);
+      
+      if (trendingData.results && trendingData.results.length > 0) {
+        setFocusedMedia(prev => prev ? prev : trendingData.results[0]);
+      }
 
       // Fetch Now Playing Movies (Novidades)
       const nowPlayingData = await fetchWithCache(`${TMDB_BASE_URL}/movie/now_playing?api_key=${TMDB_API_KEY}&language=pt-BR&region=BR`);
@@ -993,7 +998,7 @@ export default function App() {
     }
   };
 
-  const MediaCard = React.memo(({ item, onClick }: { item: MediaItem, onClick: (item: MediaItem) => void }) => (
+  const MediaCard = React.memo(({ item, onClick, onFocus }: { item: MediaItem, onClick: (item: MediaItem) => void, onFocus?: (item: MediaItem) => void }) => (
     <motion.button
       layout
       initial={{ opacity: 0, scale: 0.9 }}
@@ -1002,6 +1007,9 @@ export default function App() {
       whileFocus={{ y: -10, scale: 1.05 }}
       className="relative aspect-[2/3] group cursor-pointer flex-shrink-0 w-full h-full rounded-2xl overflow-hidden outline-none focus:ring-4 focus:ring-red-600 focus:ring-offset-4 focus:ring-offset-black focus:z-50 transition-all"
       onClick={() => onClick(item)}
+      onFocus={() => {
+        if (onFocus) onFocus(item);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           onClick(item);
@@ -1140,7 +1148,7 @@ export default function App() {
           >
             {items.map(item => (
               <div key={item.id} className="shrink-0 w-28 sm:w-32 md:w-40 lg:w-48">
-                <MediaCard item={item} onClick={onMediaClick} />
+                <MediaCard item={item} onClick={onMediaClick} onFocus={setFocusedMedia} />
               </div>
             ))}
           </div>
@@ -1759,6 +1767,73 @@ export default function App() {
         </div>
       </header>
 
+      {/* TV Hero Banner */}
+      {isTvMode && focusedMedia && (
+        <motion.div 
+          key={focusedMedia.id}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="relative w-full h-[50vh] md:h-[65vh] flex-shrink-0 -mt-24 mb-12 hidden md:block" // Hidden on mobile, but TVs are usually md or larger
+        >
+          <div className="absolute inset-0 overflow-hidden">
+            <img 
+              src={focusedMedia.backdrop_path ? `https://image.tmdb.org/t/p/original${focusedMedia.backdrop_path}` : focusedMedia.poster_path ? `${IMG_BASE_URL}${focusedMedia.poster_path}` : 'https://via.placeholder.com/1920x1080?text=Flix+BR'} 
+              className="w-full h-full object-cover opacity-60 scale-105"
+              alt="Backdrop"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b0b] via-[#0b0b0b]/40 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#0b0b0b] via-[#0b0b0b]/60 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-b from-[#0b0b0b]/80 via-transparent to-transparent" />
+          </div>
+          <div className="absolute bottom-12 left-0 p-8 md:p-16 max-w-3xl z-10">
+            <motion.h1 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              className="text-5xl md:text-7xl font-black tracking-tighter mb-4 text-white drop-shadow-2xl"
+            >
+              {focusedMedia.title || focusedMedia.name}
+            </motion.h1>
+            
+            <motion.div 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="flex items-center gap-4 mb-6"
+            >
+              <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded uppercase tracking-widest shadow-lg">
+                {focusedMedia.media_type === 'tv' || (!focusedMedia.title && focusedMedia.name) ? 'Série' : 'Filme'}
+              </span>
+              {focusedMedia.vote_average && (
+                <span className="flex items-center gap-1 text-sm font-bold text-yellow-400 bg-black/40 px-3 py-1 rounded backdrop-blur-sm border border-yellow-400/20">
+                  <Star className="w-4 h-4 fill-current" />
+                  {focusedMedia.vote_average.toFixed(1)}
+                </span>
+              )}
+            </motion.div>
+
+            <motion.p 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="text-white/80 text-lg md:text-xl line-clamp-3 mb-8 drop-shadow-md font-medium leading-relaxed"
+            >
+              {focusedMedia.overview || "Nenhuma sinopse disponível para este título."}
+            </motion.p>
+            
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.4 }}
+              className="flex items-center gap-4 text-sm font-bold text-white/50 bg-black/40 w-fit px-4 py-2 rounded-xl backdrop-blur-md border border-white/5"
+            >
+              <Info className="w-5 h-5 text-white/80" />
+              <p>Pressione <span className="text-white bg-white/20 px-2 py-0.5 rounded mx-1">OK</span> no controle para assistir</p>
+            </motion.div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Genre Bar */}
       <div className={`relative bg-black/40 border-b border-white/5 px-4 md:px-8 py-4 flex items-center group md:hidden ${isTvMode ? 'py-6' : ''}`}>
         <button onClick={() => scrollGenres('left')} className="absolute left-2 z-10 p-2 bg-black/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-600 hidden md:block">
@@ -1840,7 +1915,7 @@ export default function App() {
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
                 {continueWatching.map(item => (
                   <div key={item.id} className="relative group">
-                    <MediaCard item={item} onClick={assistir} />
+                    <MediaCard item={item} onClick={assistir} onFocus={setFocusedMedia} />
                     {item.tipo === 'tv' && (
                       <div className="absolute top-2 right-2 z-10 bg-red-600 text-[9px] font-black px-2 py-1 rounded shadow-xl pointer-events-none">
                         T{item.season} E{item.ep}
@@ -1875,7 +1950,7 @@ export default function App() {
                mediaType === 'movie' ? 'Filmes' : 'Séries'}
             </h2>
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
-              {searchResults.map(item => <React.Fragment key={item.id}><MediaCard item={item} onClick={assistir} /></React.Fragment>)}
+              {searchResults.map(item => <React.Fragment key={item.id}><MediaCard item={item} onClick={assistir} onFocus={setFocusedMedia} /></React.Fragment>)}
             </div>
           </div>
         ) : (
