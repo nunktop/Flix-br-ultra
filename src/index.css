@@ -45,7 +45,7 @@
 
   /* Selection */
   ::selection {
-    @apply bg-red-600 text-white;
+    @apply bg-orange-600 text-white;
   }
 
   /* TV Mode Optimizations */
@@ -56,12 +56,12 @@
   /* Extreme focus visibility for Smart TVs per accessibility standards */
   .tv-mode *:focus-visible,
   .tv-mode *:focus {
-    outline: 5px solid white !important; /* Thick bright outline */
+    outline: 5px solid #f97316 !important; /* Orange outline */
     outline-offset: 4px !important;
-    transform: scale(1.05); /* Noticeable pop effect */
+    transform: scale(1.06); /* Noticeable pop effect */
     transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), outline 0.1s ease-in, box-shadow 0.2s ease-out;
     z-index: 50;
-    box-shadow: 0 0 30px rgba(255, 255, 255, 0.8), 0 0 15px rgba(220, 38, 38, 0.8) !important; /* Glow effect */
+    box-shadow: 0 0 50px rgba(249, 115, 22, 0.7) !important; /* Orange Glow */
     background-color: rgba(255, 255, 255, 0.1); 
   }
 
@@ -92,6 +92,10 @@
   .text-glow {
     text-shadow: 0 0 20px rgba(220, 38, 38, 0.5);
   }
+
+  .text-glow-orange {
+    text-shadow: 0 0 20px rgba(249, 115, 22, 0.5);
+  }
   
   .bg-glass {
     @apply bg-black/60 backdrop-blur-xl border border-white/5;
@@ -99,5 +103,13 @@
 
   .aspect-video-tv {
     aspect-ratio: 16 / 9;
+  }
+
+  .gradient-cinema {
+    background: linear-gradient(to top, #0b0b0b 0%, transparent 50%, rgba(0,0,0,0.4) 100%);
+  }
+
+  .gradient-cinema-orange {
+    background: linear-gradient(45deg, #dc2626 0%, #f97316 100%);
   }
 }

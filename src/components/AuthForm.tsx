@@ -72,7 +72,7 @@ export function AuthForm({ onClose, onSuccess }: AuthFormProps) {
           <div className="flex items-center gap-2">
             <Play className="w-8 h-8 text-red-600 fill-red-600" />
             <span className="text-2xl font-black italic tracking-tighter">
-              FLIX BR<span className="text-red-600"> ULTRA+</span>
+              FLIX <span className="text-orange-500">BR</span><span className="text-red-600"> ULTRA+</span>
             </span>
           </div>
         </div>
@@ -89,7 +89,7 @@ export function AuthForm({ onClose, onSuccess }: AuthFormProps) {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:border-red-600 outline-none transition-colors"
+              className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
               placeholder="Digite seu email"
             />
           </div>
@@ -100,7 +100,7 @@ export function AuthForm({ onClose, onSuccess }: AuthFormProps) {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:border-red-600 outline-none transition-colors"
+              className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none transition-all"
               placeholder="Digite sua senha"
             />
           </div>
@@ -114,9 +114,9 @@ export function AuthForm({ onClose, onSuccess }: AuthFormProps) {
           <button 
             type="submit"
             disabled={loading}
-            className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-black uppercase tracking-widest py-3 rounded-lg transition-colors mt-4"
+            className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 disabled:opacity-50 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-all mt-6 shadow-[0_0_20px_rgba(249,115,22,0.3)] active:scale-95 focus:outline-none focus:ring-4 focus:ring-orange-500/50"
           >
-            {loading ? 'Aguarde...' : (isLogin ? 'Entrar' : 'Cadastrar')}
+            {loading ? 'Aguarde...' : (isLogin ? 'Entrar Agora' : 'Criar Conta')}
           </button>
         </form>
 

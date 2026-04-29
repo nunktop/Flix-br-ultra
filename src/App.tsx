@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, X, Play, SkipForward, History, ChevronRight, ChevronLeft, Film, Tv, TrendingUp, Star, Server, Sparkles, AlertCircle, RefreshCcw, Bell, Maximize, Minimize, LogOut, Info } from 'lucide-react';
+import { Search, X, Play, SkipForward, History, ChevronRight, ChevronLeft, Film, Tv, TrendingUp, Star, Server, Sparkles, AlertCircle, RefreshCcw, Bell, Maximize, Minimize, LogOut, Info, Plus, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { AuthForm } from './components/AuthForm';
@@ -36,7 +36,9 @@ interface MediaItem {
   title?: string;
   name?: string;
   poster_path: string;
+  backdrop_path?: string;
   media_type?: 'movie' | 'tv';
+  overview?: string;
   genre_ids?: number[];
   vote_average?: number;
   original_language?: string;
@@ -113,6 +115,7 @@ export default function App() {
   const [specialCategory, setSpecialCategory] = useState<'anime' | 'animation' | null>(null);
   const [continueWatching, setContinueWatching] = useState<(MediaItem & PlayerState)[]>([]);
   const [showContinue, setShowContinue] = useState(false);
+  const [showFavorites, setShowFavorites] = useState(false);
   const [isFullMenuOpen, setIsFullMenuOpen] = useState(false);
   const [isSeasonMenuOpen, setIsSeasonMenuOpen] = useState(false);
   const [isEpisodeMenuOpen, setIsEpisodeMenuOpen] = useState(false);
@@ -121,6 +124,55 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showVipModal, setShowVipModal] = useState(false);
   const [focusedMedia, setFocusedMedia] = useState<MediaItem | null>(null);
+  const [favorites, setFavorites] = useState<MediaItem[]>([]);
+
+  const fetchFavorites = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('favorites')
+        .select('*')
+        .eq('user_id', userId);
+      
+      if (error) throw error;
+      if (data) {
+        setFavorites(data.map(f => f.media_data));
+      }
+    } catch (err) {
+      console.error("Erro ao buscar favoritos:", err);
+    }
+  };
+
+  const toggleFavorite = async (item: MediaItem) => {
+    if (!user) return;
+    
+    const isFav = favorites.some(f => f.id === item.id);
+    
+    try {
+      if (isFav) {
+        const { error } = await supabase
+          .from('favorites')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('media_id', item.id);
+        
+        if (error) throw error;
+        setFavorites(prev => prev.filter(f => f.id !== item.id));
+      } else {
+        const { error } = await supabase
+          .from('favorites')
+          .insert({
+            user_id: user.id,
+            media_id: item.id,
+            media_data: item
+          });
+        
+        if (error) throw error;
+        setFavorites(prev => [...prev, item]);
+      }
+    } catch (err) {
+      console.error("Erro ao alternar favorito:", err);
+    }
+  };
 
   const checkVipAccess = () => {
     if (user?.isAdmin) return true;
@@ -131,6 +183,23 @@ export default function App() {
     return false;
   };
 
+  // Auto-focus first item when switching views in TV mode
+  useEffect(() => {
+    if (isTvMode) {
+      if (showFavorites && favorites.length > 0) {
+        setTimeout(() => {
+          const firstCard = document.querySelector('main .grid [role="button"]');
+          if (firstCard instanceof HTMLElement) firstCard.focus();
+        }, 100);
+      } else if (showContinue && continueWatching.length > 0) {
+        setTimeout(() => {
+          const firstCard = document.querySelector('main .grid [role="button"]');
+          if (firstCard instanceof HTMLElement) firstCard.focus();
+        }, 100);
+      }
+    }
+  }, [showFavorites, showContinue, isTvMode]);
+  
   const fechar = useCallback(() => {
     setIsPlayerOpen(false);
   }, []);
@@ -654,11 +723,12 @@ export default function App() {
           fechar();
         } else if (isFullMenuOpen) {
           setIsFullMenuOpen(false);
-        } else if (searchQuery || selectedGenre || specialCategory || showContinue) {
+        } else if (searchQuery || selectedGenre || specialCategory || showContinue || showFavorites) {
           setSearchQuery("");
           setSelectedGenre(null);
           setSpecialCategory(null);
           setShowContinue(false);
+          setShowFavorites(false);
           setMediaType('all');
         }
       }
@@ -998,13 +1068,26 @@ export default function App() {
     }
   };
 
-  const MediaCard = React.memo(({ item, onClick, onFocus }: { item: MediaItem, onClick: (item: MediaItem) => void, onFocus?: (item: MediaItem) => void }) => (
-    <motion.button
+  const MediaCard = React.memo(({ 
+    item, 
+    onClick, 
+    onFocus, 
+    onToggleFavorite, 
+    isFavorite 
+  }: { 
+    item: MediaItem, 
+    onClick: (item: MediaItem) => void, 
+    onFocus?: (item: MediaItem) => void,
+    onToggleFavorite?: (item: MediaItem) => void,
+    isFavorite?: boolean
+  }) => (
+    <motion.div
       layout
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       whileHover={{ y: -10, scale: 1.05 }}
       whileFocus={{ y: -10, scale: 1.05 }}
+      role="button"
       className="relative aspect-[2/3] group cursor-pointer flex-shrink-0 w-full h-full rounded-2xl overflow-hidden outline-none focus:ring-4 focus:ring-red-600 focus:ring-offset-4 focus:ring-offset-black focus:z-50 transition-all"
       onClick={() => onClick(item)}
       onFocus={() => {
@@ -1018,6 +1101,18 @@ export default function App() {
       tabIndex={0}
       aria-label={`Assistir ${item.title || item.name}`}
     >
+      {onToggleFavorite && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(item);
+          }}
+          className={`absolute top-2 right-2 z-20 p-2 rounded-full transition-all duration-300 transform translate-y-[-10px] group-hover:translate-y-0 group-focus:translate-y-0 opacity-0 group-hover:opacity-100 group-focus:opacity-100 ${isFavorite ? 'bg-orange-600 text-white' : 'bg-black/60 text-white hover:bg-white/20'}`}
+          title={isFavorite ? "Remover da minha lista" : "Adicionar à minha lista"}
+        >
+          {isFavorite ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+        </button>
+      )}
       <img
         src={item.poster_path ? `${IMG_BASE_URL}${item.poster_path}` : 'https://via.placeholder.com/500x750?text=Sem+Poster'}
         alt={item.title || item.name}
@@ -1047,7 +1142,7 @@ export default function App() {
           )}
         </div>
       </div>
-    </motion.button>
+    </motion.div>
   ));
 
   const ScrollableRow = ({ 
@@ -1148,7 +1243,13 @@ export default function App() {
           >
             {items.map(item => (
               <div key={item.id} className="shrink-0 w-28 sm:w-32 md:w-40 lg:w-48">
-                <MediaCard item={item} onClick={onMediaClick} onFocus={setFocusedMedia} />
+                <MediaCard 
+                  item={item} 
+                  onClick={onMediaClick} 
+                  onFocus={setFocusedMedia} 
+                  onToggleFavorite={toggleFavorite}
+                  isFavorite={favorites.some(f => f.id === item.id)}
+                />
               </div>
             ))}
           </div>
@@ -1349,6 +1450,15 @@ export default function App() {
         </button>
 
         <button 
+          onClick={() => toggleFavorite(atual)}
+          className={`${favorites.some(f => f.id === atual.id) ? 'bg-orange-600/40 text-orange-400 border-orange-500/40' : 'bg-white/5 text-white/40 border-white/10'} backdrop-blur-md px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest border active:scale-95 shadow-xl focus:outline-none focus:ring-2 focus:ring-white whitespace-nowrap flex-shrink-0`}
+          title={favorites.some(f => f.id === atual.id) ? "Remover da Lista" : "Adicionar à Lista"}
+        >
+          {favorites.some(f => f.id === atual.id) ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+          <span>{favorites.some(f => f.id === atual.id) ? 'Na Lista' : 'Minha Lista'}</span>
+        </button>
+
+        <button 
           onClick={toggleFullscreen}
           className="bg-white/10 hover:bg-white/20 focus:bg-white/30 focus:outline-none focus:ring-2 focus:ring-white backdrop-blur-md px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest border border-white/10 active:scale-95 shadow-xl whitespace-nowrap flex-shrink-0"
           title="Tela Cheia"
@@ -1499,8 +1609,8 @@ export default function App() {
           >
             <div className="flex items-center justify-between mb-12">
               <div className="flex items-center gap-2">
-                <span className="text-4xl font-black tracking-tighter text-red-600 italic">Flix BR</span>
-                <span className="bg-red-600 text-xs font-bold px-2 py-1 rounded uppercase tracking-widest">Ultra+</span>
+                <span className="text-4xl font-black tracking-tighter text-red-600 italic">Flix <span className="text-orange-500">BR</span></span>
+                <span className="bg-gradient-to-r from-red-600 to-orange-600 text-xs font-bold px-2 py-1 rounded uppercase tracking-widest shadow-[0_0_15px_rgba(239,68,68,0.4)]">Ultra+</span>
               </div>
               <button 
                 id="close-full-menu"
@@ -1516,12 +1626,13 @@ export default function App() {
                 <h3 className="text-red-600 font-black uppercase tracking-[0.3em] text-sm">Navegação</h3>
                 <div className="flex flex-col gap-4">
                   {[
-                    { label: 'Início', action: () => { setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); } },
-                    { label: 'Filmes', action: () => { setMediaType('movie'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); } },
-                    { label: 'Séries', action: () => { setMediaType('tv'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); } },
-                    { label: 'Animes', action: () => { setSpecialCategory('anime'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); } },
-                    { label: 'Desenhos', action: () => { setSpecialCategory('animation'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); } },
-                    { label: 'Continuar Assistindo', action: () => { setShowContinue(true); setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); } },
+                    { label: 'Início', action: () => { setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); setShowFavorites(false); } },
+                    { label: 'Filmes', action: () => { setMediaType('movie'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); setShowFavorites(false); } },
+                    { label: 'Séries', action: () => { setMediaType('tv'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); setShowFavorites(false); } },
+                    { label: 'Animes', action: () => { setSpecialCategory('anime'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); setShowFavorites(false); } },
+                    { label: 'Desenhos', action: () => { setSpecialCategory('animation'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); setShowFavorites(false); } },
+                    { label: 'Continuar Assistindo', action: () => { setShowContinue(true); setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowFavorites(false); } },
+                    { label: 'Minha Lista', action: () => { setShowFavorites(true); setShowContinue(false); setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); } },
                     { label: 'Pesquisar', action: () => { document.querySelector('input')?.focus(); } },
                     { label: 'Sair da Conta', action: () => { handleLogout(); setIsFullMenuOpen(false); } }
                   ].map((item, i) => (
@@ -1590,8 +1701,8 @@ export default function App() {
             onClick={() => setIsFullMenuOpen(true)}
             title="Menu Completo"
           >
-            <span className="text-2xl font-black tracking-tighter text-red-600 italic">Flix BR</span>
-            <span className="bg-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest">Ultra+</span>
+            <span className="text-2xl font-black tracking-tighter text-red-600 italic">Flix <span className="text-orange-500">BR</span></span>
+            <span className="bg-gradient-to-r from-red-600 to-orange-600 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest shadow-[0_0_10px_rgba(239,68,68,0.3)]">Ultra+</span>
           </button>
 
           <div className="flex items-center gap-4">
@@ -1630,47 +1741,47 @@ export default function App() {
         <div className="flex items-center gap-4 w-full lg:w-auto overflow-x-auto no-scrollbar pb-2 lg:pb-0">
           <nav className={`flex items-center gap-4 md:gap-6 text-sm font-bold text-white/60 uppercase tracking-wider shrink-0 ${isTvMode ? 'text-lg gap-10 lg:gap-14' : ''}`}>
             <button 
-              onClick={() => { setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${mediaType === 'all' && !selectedGenre && !searchQuery && !specialCategory && !showContinue ? 'text-white scale-110' : ''}`}
+              onClick={() => { setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); setShowFavorites(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${mediaType === 'all' && !selectedGenre && !searchQuery && !specialCategory && !showContinue && !showFavorites ? 'text-white scale-110' : ''}`}
             >
               Início
-              {mediaType === 'all' && !selectedGenre && !searchQuery && !specialCategory && !showContinue && (
+              {mediaType === 'all' && !selectedGenre && !searchQuery && !specialCategory && !showContinue && !showFavorites && (
                 <motion.div layoutId="activeTabDesktop" className="absolute -bottom-1 left-0 right-0 h-0.5 bg-red-600 rounded-full" />
               )}
             </button>
             <button 
-              onClick={() => { setMediaType('movie'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${mediaType === 'movie' && !specialCategory ? 'text-white scale-110' : ''}`}
+              onClick={() => { setMediaType('movie'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowFavorites(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${mediaType === 'movie' && !specialCategory && !showFavorites ? 'text-white scale-110' : ''}`}
             >
               Filmes
-              {mediaType === 'movie' && !specialCategory && (
+              {mediaType === 'movie' && !specialCategory && !showFavorites && (
                 <motion.div layoutId="activeTabDesktop" className="absolute -bottom-1 left-0 right-0 h-0.5 bg-red-600 rounded-full" />
               )}
             </button>
             <button 
-              onClick={() => { setMediaType('tv'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${mediaType === 'tv' && !specialCategory && !showContinue ? 'text-white scale-110' : ''}`}
+              onClick={() => { setMediaType('tv'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowContinue(false); setShowFavorites(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${mediaType === 'tv' && !specialCategory && !showContinue && !showFavorites ? 'text-white scale-110' : ''}`}
             >
               Séries
-              {mediaType === 'tv' && !specialCategory && !showContinue && (
+              {mediaType === 'tv' && !specialCategory && !showContinue && !showFavorites && (
                 <motion.div layoutId="activeTabDesktop" className="absolute -bottom-1 left-0 right-0 h-0.5 bg-red-600 rounded-full" />
               )}
             </button>
             <button 
-              onClick={() => { setSpecialCategory('anime'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${specialCategory === 'anime' && !showContinue ? 'text-white scale-110' : ''}`}
+              onClick={() => { setSpecialCategory('anime'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); setShowFavorites(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${specialCategory === 'anime' && !showContinue && !showFavorites ? 'text-white scale-110' : ''}`}
             >
               Animes
-              {specialCategory === 'anime' && !showContinue && (
+              {specialCategory === 'anime' && !showContinue && !showFavorites && (
                 <motion.div layoutId="activeTabDesktop" className="absolute -bottom-1 left-0 right-0 h-0.5 bg-red-600 rounded-full" />
               )}
             </button>
             <button 
-              onClick={() => { setSpecialCategory('animation'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${specialCategory === 'animation' && !showContinue ? 'text-white scale-110' : ''}`}
+              onClick={() => { setSpecialCategory('animation'); setSelectedGenre(null); setSearchQuery(""); setMediaType('all'); setShowContinue(false); setShowFavorites(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${specialCategory === 'animation' && !showContinue && !showFavorites ? 'text-white scale-110' : ''}`}
             >
               Desenhos
-              {specialCategory === 'animation' && !showContinue && (
+              {specialCategory === 'animation' && !showContinue && !showFavorites && (
                 <motion.div layoutId="activeTabDesktop" className="absolute -bottom-1 left-0 right-0 h-0.5 bg-red-600 rounded-full" />
               )}
             </button>
@@ -1705,13 +1816,24 @@ export default function App() {
               </AnimatePresence>
             </div>
             <button 
-              onClick={() => { setShowContinue(true); setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              onClick={() => { setShowContinue(true); setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); setShowFavorites(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
               className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${showContinue ? 'text-white scale-110' : ''} flex items-center gap-2`}
             >
               <History className="w-4 h-4" />
               Continuar
               {showContinue && (
                 <motion.div layoutId="activeTabDesktop" className="absolute -bottom-1 left-0 right-0 h-0.5 bg-red-600 rounded-full" />
+              )}
+            </button>
+
+            <button 
+              onClick={() => { setShowFavorites(true); setShowContinue(false); setMediaType('all'); setSelectedGenre(null); setSearchQuery(""); setSpecialCategory(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              className={`hover:text-white transition-all focus:outline-none focus:text-white focus:ring-2 focus:ring-red-600 rounded-md px-2 py-1 relative ${showFavorites ? 'text-white scale-110' : ''} flex items-center gap-2`}
+            >
+              <Plus className="w-4 h-4 text-orange-500" />
+              Minha Lista
+              {showFavorites && (
+                <motion.div layoutId="activeTabDesktop" className="absolute -bottom-1 left-0 right-0 h-0.5 bg-orange-600 rounded-full" />
               )}
             </button>
 
@@ -1825,10 +1947,20 @@ export default function App() {
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.4 }}
-              className="flex items-center gap-4 text-sm font-bold text-white/50 bg-black/40 w-fit px-4 py-2 rounded-xl backdrop-blur-md border border-white/5"
+              className="flex items-center gap-6"
             >
-              <Info className="w-5 h-5 text-white/80" />
-              <p>Pressione <span className="text-white bg-white/20 px-2 py-0.5 rounded mx-1">OK</span> no controle para assistir</p>
+              <div className="flex items-center gap-4 text-sm font-bold text-white/50 bg-black/40 w-fit px-4 py-3 rounded-xl backdrop-blur-md border border-white/5 shadow-2xl">
+                <Info className="w-5 h-5 text-white/80" />
+                <p>Pressione <span className="text-white bg-white/20 px-2 py-0.5 rounded mx-1 uppercase tracking-tighter">Enter</span> para assistir</p>
+              </div>
+
+              <button
+                onClick={() => toggleFavorite(focusedMedia)}
+                className={`flex items-center gap-3 px-6 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all shadow-2xl focus:outline-none focus:ring-4 focus:ring-white/50 ${favorites.some(f => f.id === focusedMedia.id) ? 'bg-orange-600 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+              >
+                {favorites.some(f => f.id === focusedMedia.id) ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+                {favorites.some(f => f.id === focusedMedia.id) ? 'Na Minha Lista' : 'Minha Lista'}
+              </button>
             </motion.div>
           </div>
         </motion.div>
@@ -1915,7 +2047,13 @@ export default function App() {
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
                 {continueWatching.map(item => (
                   <div key={item.id} className="relative group">
-                    <MediaCard item={item} onClick={assistir} onFocus={setFocusedMedia} />
+                    <MediaCard 
+                      item={item} 
+                      onClick={assistir} 
+                      onFocus={setFocusedMedia} 
+                      onToggleFavorite={toggleFavorite}
+                      isFavorite={favorites.some(f => f.id === item.id)}
+                    />
                     {item.tipo === 'tv' && (
                       <div className="absolute top-2 right-2 z-10 bg-red-600 text-[9px] font-black px-2 py-1 rounded shadow-xl pointer-events-none">
                         T{item.season} E{item.ep}
@@ -1940,6 +2078,44 @@ export default function App() {
               </div>
             )}
           </div>
+        ) : showFavorites ? (
+          <div className="px-4 md:px-8 lg:px-12">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="text-xl md:text-2xl font-black tracking-tight flex items-center gap-3">
+                <Plus className="w-6 h-6 text-orange-500" />
+                Minha Lista
+              </h2>
+            </div>
+            
+            {favorites.length > 0 ? (
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
+                {favorites.map(item => (
+                  <MediaCard 
+                    key={item.id} 
+                    item={item} 
+                    onClick={assistir} 
+                    onFocus={setFocusedMedia} 
+                    onToggleFavorite={toggleFavorite}
+                    isFavorite={true}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
+                  <Star className="w-10 h-10 text-white/20" />
+                </div>
+                <h3 className="text-xl font-black mb-2">Sua lista está vazia</h3>
+                <p className="text-white/40 max-w-xs text-sm">Adicione filmes e séries favoritos para encontrá-los facilmente aqui.</p>
+                <button 
+                  onClick={() => setShowFavorites(false)}
+                  className="mt-8 bg-orange-600 hover:bg-orange-700 focus:bg-orange-700 focus:outline-none focus:ring-4 focus:ring-orange-500 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all active:scale-95"
+                >
+                  Explorar Catálogo
+                </button>
+              </div>
+            )}
+          </div>
         ) : searchQuery || selectedGenre || mediaType !== 'all' || specialCategory ? (
           <div className="px-4 md:px-8 lg:px-12">
             <h2 className="text-xl md:text-2xl font-black tracking-tight mb-8 flex items-center gap-3">
@@ -1950,7 +2126,16 @@ export default function App() {
                mediaType === 'movie' ? 'Filmes' : 'Séries'}
             </h2>
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
-              {searchResults.map(item => <React.Fragment key={item.id}><MediaCard item={item} onClick={assistir} onFocus={setFocusedMedia} /></React.Fragment>)}
+              {searchResults.map(item => (
+                <MediaCard 
+                  key={item.id} 
+                  item={item} 
+                  onClick={assistir} 
+                  onFocus={setFocusedMedia} 
+                  onToggleFavorite={toggleFavorite}
+                  isFavorite={favorites.some(f => f.id === item.id)}
+                />
+              ))}
             </div>
           </div>
         ) : (
@@ -2240,7 +2425,7 @@ export default function App() {
 
       <footer className="p-12 text-center border-t border-white/5">
         <div className="flex items-center justify-center gap-2 mb-4 opacity-30">
-          <span className="text-xl font-black tracking-tighter italic text-red-600">Flix BR</span>
+          <span className="text-xl font-black tracking-tighter italic text-red-600">Flix <span className="text-orange-500">BR</span></span>
           <span className="bg-white text-black text-[8px] font-bold px-1 py-0.5 rounded uppercase tracking-widest">Ultra+</span>
         </div>
         <p className="opacity-20 text-[9px] uppercase tracking-[0.4em]">
